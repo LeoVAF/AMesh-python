@@ -626,7 +626,7 @@ class AMESH:
                     self.pre_allocated.fitness_copy[:] = self.population.fitness.copy()
                     # Apply the movviment to the particles
                     self.move_population(swarm_hp_memory_indices)
-                    # Preserve the originating targets before elitist replacement.
+                    # Preserve the originating targets before elitist replacement
                     swarm_target_positions = self.population.position.copy()
                     # Select the best particles from those before and after the moviment
                     best_copy_idxs = self.elitism()
