@@ -72,7 +72,7 @@ def fine_tune_maco(experiment: dict[str, Any],
 		for step in range(n_steps):
 			random_state = experiment['random_state'] if experiment['random_state'] is not None else np.random.randint(0, 2147483647)
 			initial_population = pg.population(pygmo_problem, size=population_size, seed=random_state) # type: ignore
-			maco = pg.algorithm(pg.maco(gen=max_fitness_eval // population_size, # type: ignore
+			maco = pg.algorithm(pg.maco(gen=max_fitness_eval // population_size - 1, # type: ignore
 										ker=ker,
 										q=q,
 										focus=focus,
@@ -274,7 +274,7 @@ def fine_tune_nsga2(experiment: dict[str, Any],
 		for step in range(n_steps):
 			random_state = experiment['random_state'] if experiment['random_state'] is not None else np.random.randint(0, 2147483647)
 			initial_population = pg.population(pygmo_problem, size=population_size, seed=random_state) # type: ignore
-			nsga2 = pg.algorithm(pg.nsga2(gen=max_fitness_eval // population_size, # type: ignore
+			nsga2 = pg.algorithm(pg.nsga2(gen=max_fitness_eval // population_size - 1, # type: ignore
 								 		  cr=recombination_probability,
 										  eta_c=eta_recombination,
 										  m=mutation_probability,
@@ -344,7 +344,7 @@ def fine_tune_nspso(experiment: dict[str, Any],
 		for step in range(n_steps):
 			random_state = experiment['random_state'] if experiment['random_state'] is not None else np.random.randint(0, 2147483647)
 			initial_population = pg.population(pygmo_problem, size=population_size, seed=random_state) # type: ignore
-			nspso = pg.algorithm(pg.nspso(gen=max_fitness_eval // population_size, # type: ignore
+			nspso = pg.algorithm(pg.nspso(gen=max_fitness_eval // population_size - 1, # type: ignore
 								 		  omega=omega,
 										  c1=c1,
 										  c2=c2,
