@@ -222,14 +222,10 @@ class AMESH:
         return non_dominated_fronts
 
     def update_de_memory(self,
-                         pop_promising_position: NDArray[np.number],
-                         survival_position: NDArray[np.number],
                          pop_promising_idxs: NDArray[np.intp]) -> None:
-        r''' Updates the DE historical means using successful offspring. The scaling factor ``F`` is updated using a weighted Lehmer mean, while the crossover rate ``CR`` is updated using a weighted arithmetic mean.
+        r''' Updates the DE historical means using successful offspring. The scaling factor ``F`` is updated using an unweighted Lehmer mean, while the crossover rate ``CR`` is updated using an arithmetic mean.
 
         Args:
-            pop_promising_position (:type:`NDArray[np.number]`): Matrix containing the original decision vectors associated with the successful offspring. Its shape must be ``(n_success, decision_dim)``.
-            survival_position (:type:`NDArray[np.number]`): Matrix containing the surviving offspring decision vectors corresponding to ``position``. Its shape must be ``(n_success, decision_dim)``.
             pop_promising_idxs (:type:`NDArray[np.intp]`): Indices of the particles from population that generated successful offspring. These indices are used to retrieve the successful ``F`` and ``CR`` values.
         '''
 
@@ -238,18 +234,10 @@ class AMESH:
         # Get successful values of F and CR
         successful_F = self.params.DE_F[pop_promising_idxs]
         successful_CR = self.params.DE_CR[pop_promising_idxs]
-        # Calculate the weight based on Euclidean distance between the position and the survival position
-        normalized_step = (pop_promising_position - survival_position) / (self.params.decision_upper_bounds - self.params.decision_lower_bounds)
-        euclidean_distance = np.linalg.norm(normalized_step, axis=1)
-        distance_sum = np.sum(euclidean_distance)
-        if distance_sum > 0:
-            weight = euclidean_distance / distance_sum
-        else:
-            weight = np.full(len(euclidean_distance), 1.0 / len(euclidean_distance))
-        # Weighted SHADE-style Lehmer mean for F
-        mean_F = np.sum((successful_F ** 2) * weight) / np.sum(successful_F * weight)
-        # Weighted arithmetic mean for CR
-        mean_CR = np.sum(successful_CR * weight)
+        # Unweighted Lehmer mean for F
+        mean_F = np.sum(successful_F ** 2) / np.sum(successful_F)
+        # Arithmetic mean for CR
+        mean_CR = np.mean(successful_CR)
         # Update the DE memory
         k = self.params.hyperparameter_last_index
         self.params.DE_memory[k, 0] = mean_F
@@ -320,9 +308,7 @@ class AMESH:
             best_st_indices = best_N_idxs[mask_best] - population_size
             # Update the DE memory with the successful offspring
             pop_promising_idxs = applied_st_pop_idxs[best_st_indices]
-            self.update_de_memory(self.population.position[pop_promising_idxs],
-                                  Xst_rec[best_st_indices],
-                                  pop_promising_idxs)
+            self.update_de_memory(pop_promising_idxs)
             # Put the best particles from strategy array in the current population
             np.logical_not(mask_best, out=mask_best)
             mask_pop_worst = np.ones(population_size, dtype=bool)
@@ -367,15 +353,11 @@ class AMESH:
         return swarm_hp_memory_indices
 
     def update_swarm_memory(self,
-                            pop_promising_position: NDArray[np.number],
-                            survival_position: NDArray[np.number],
                             pop_promising_idxs: NDArray[np.intp]) -> None:
-        r'''Updates the swarm historical means using successful offspring. The inertia, assimilation, and communication weights and the mutation rate are updated using a weighted Lehmer mean, while the communication probability is updated using a weighted arithmetic mean.
+        r'''Updates the swarm historical means using successful offspring. The inertia, assimilation, and communication weights and the mutation rate are updated using an unweighted Lehmer mean, while the communication probability is updated using an arithmetic mean.
         
         Args:
-            pop_promising_position (:type:`NDArray[np.number]`): Matrix containing the original decision vectors associated with the successful offspring. Its shape must be ``(n_success, decision_dim)``.
-            survival_position (:type:`NDArray[np.number]`): Matrix containing the surviving offspring decision vectors corresponding to ``position``. Its shape must be ``(n_success, decision_dim)``.
-            pop_promising_idxs (:type:`NDArray[np.intp]`): Indices of the particles from population that generated successful offspring. These indices are used to retrieve the successful ``F`` and ``CR`` values.
+            pop_promising_idxs (:type:`NDArray[np.intp]`): Indices of the particles that generated successful offspring, used to retrieve their swarm parameter values.
         '''
 
         if len(pop_promising_idxs) == 0:
@@ -384,19 +366,11 @@ class AMESH:
         successful_W = self.params.SWARM_W[pop_promising_idxs]
         successful_Pcom = self.params.SWARM_Pcom[pop_promising_idxs]
         successful_mutation_rate = self.params.SWARM_mutation_scale[pop_promising_idxs]
-        # Calculate the weight based on Euclidean distance between the position and the survival position
-        normalized_step = (pop_promising_position - survival_position) / (self.params.decision_upper_bounds - self.params.decision_lower_bounds)
-        euclidean_distance = np.linalg.norm(normalized_step, axis=1)
-        distance_sum = np.sum(euclidean_distance)
-        if distance_sum > 0:
-            weight = euclidean_distance / distance_sum
-        else:
-            weight = np.full(len(euclidean_distance), 1.0 / len(euclidean_distance))
-        # SHADE-style Lehmer mean
-        mean_W = np.sum((successful_W ** 2) * weight[:, np.newaxis], axis=0) / np.sum(successful_W * weight[:, np.newaxis], axis=0)
-        mean_mutation_rate = np.sum((successful_mutation_rate ** 2) * weight) / np.sum(successful_mutation_rate * weight)
+        # Unweighted Lehmer means
+        mean_W = np.sum(successful_W ** 2, axis=0) / np.sum(successful_W, axis=0)
+        mean_mutation_rate = np.sum(successful_mutation_rate ** 2) / np.sum(successful_mutation_rate)
         # Arithmetic mean
-        mean_Pcom = np.sum(successful_Pcom * weight)
+        mean_Pcom = np.mean(successful_Pcom)
         # Update the swarm memory
         k = self.params.hyperparameter_last_index
         self.params.SWARM_memory[k, 0:3] = mean_W
@@ -626,14 +600,10 @@ class AMESH:
                     self.pre_allocated.fitness_copy[:] = self.population.fitness.copy()
                     # Apply the movviment to the particles
                     self.move_population(swarm_hp_memory_indices)
-                    # Preserve the originating targets before elitist replacement
-                    swarm_target_positions = self.population.position.copy()
                     # Select the best particles from those before and after the moviment
                     best_copy_idxs = self.elitism()
                     # Update the swarm hyperparameter memory
-                    self.update_swarm_memory(swarm_target_positions[best_copy_idxs],
-                                             self.pre_allocated.position_copy[best_copy_idxs],
-                                             best_copy_idxs)
+                    self.update_swarm_memory(best_copy_idxs)
                     # Update A-MESH memory
                     self.update_amesh_memory()
                     # Update the algorithm progress
