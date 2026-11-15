@@ -1,0 +1,4 @@
+global_best_attribution_type: 0 (int)
+differential_mutation_pool_type: 0 (int)
+differential_mutation_type: 2 (int)
+personal_guide_array_size: 1 (int)
