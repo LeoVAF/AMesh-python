@@ -222,14 +222,10 @@ class AMESH:
         return non_dominated_fronts
 
     def update_de_memory(self,
-                         pop_promising_position: NDArray[np.number],
-                         survival_position: NDArray[np.number],
                          pop_promising_idxs: NDArray[np.intp]) -> None:
-        r''' Updates the DE historical means using successful offspring. The scaling factor ``F`` is updated using a weighted Lehmer mean, while the crossover rate ``CR`` is updated using a weighted arithmetic mean.
+        r''' Updates the DE historical means using successful offspring. The scaling factor ``F`` is updated using an unweighted Lehmer mean, while the crossover rate ``CR`` is updated using an arithmetic mean.
 
         Args:
-            pop_promising_position (:type:`NDArray[np.number]`): Matrix containing the original decision vectors associated with the successful offspring. Its shape must be ``(n_success, decision_dim)``.
-            survival_position (:type:`NDArray[np.number]`): Matrix containing the surviving offspring decision vectors corresponding to ``position``. Its shape must be ``(n_success, decision_dim)``.
             pop_promising_idxs (:type:`NDArray[np.intp]`): Indices of the particles from population that generated successful offspring. These indices are used to retrieve the successful ``F`` and ``CR`` values.
         '''
 
@@ -238,18 +234,10 @@ class AMESH:
         # Get successful values of F and CR
         successful_F = self.params.DE_F[pop_promising_idxs]
         successful_CR = self.params.DE_CR[pop_promising_idxs]
-        # Calculate the weight based on Euclidean distance between the position and the survival position
-        normalized_step = (pop_promising_position - survival_position) / (self.params.decision_upper_bounds - self.params.decision_lower_bounds)
-        euclidean_distance = np.linalg.norm(normalized_step, axis=1)
-        distance_sum = np.sum(euclidean_distance)
-        if distance_sum > 0:
-            weight = euclidean_distance / distance_sum
-        else:
-            weight = np.full(len(euclidean_distance), 1.0 / len(euclidean_distance))
-        # Weighted SHADE-style Lehmer mean for F
-        mean_F = np.sum((successful_F ** 2) * weight) / np.sum(successful_F * weight)
-        # Weighted arithmetic mean for CR
-        mean_CR = np.sum(successful_CR * weight)
+        # Unweighted Lehmer mean for F
+        mean_F = np.sum(successful_F ** 2) / np.sum(successful_F)
+        # Arithmetic mean for CR
+        mean_CR = np.mean(successful_CR)
         # Update the DE memory
         k = self.params.hyperparameter_last_index
         self.params.DE_memory[k, 0] = mean_F
@@ -318,6 +306,9 @@ class AMESH:
             # Get the indices of the best particles in the strategy array
             mask_best = best_N_idxs >= population_size
             best_st_indices = best_N_idxs[mask_best] - population_size
+            # Update the DE memory with the successful offspring
+            pop_promising_idxs = applied_st_pop_idxs[best_st_indices]
+            self.update_de_memory(pop_promising_idxs)
             # Put the best particles from strategy array in the current population
             np.logical_not(mask_best, out=mask_best)
             mask_pop_worst = np.ones(population_size, dtype=bool)
@@ -325,13 +316,8 @@ class AMESH:
             worst_pop_idxs = np.flatnonzero(mask_pop_worst)
             population_positions[worst_pop_idxs] = Xst_rec[best_st_indices]
             self.population.fitness[worst_pop_idxs] = Fst_rec[best_st_indices]
-            # Update the DE memory
-            pop_promising_idxs = applied_st_pop_idxs[best_st_indices]
-            self.update_de_memory(self.population.position[pop_promising_idxs],
-                                  Xst[best_st_indices],
-                                  pop_promising_idxs)
 
-    def mutation(self) -> None:
+    def mutation(self) -> NDArray[np.intp]:
         r''' Calculates the mutation of the global guides are done by the following equation:
 
         .. math::
@@ -339,15 +325,18 @@ class AMESH:
             \tilde{x}_{gb} = x_{gb} + \tau_{mut} \cdot \vec{r}, \quad \vec{r} \sim \mathcal{N}(\vec{0}, I),
             
         where :math:`I` is the identity matrix.
+
+        Returns:
+            :type:`NDArray[np.intp]`: The indices of the swarm hyperparameter memory used for the mutation.
         '''
         
         pop_size = self.params.population_size
         decision_dim = self.params.decision_dim
         # Calculate adaptative mutation rate
-        random_index = np.random.randint(self.params.hyperparameter_memory_length, size=pop_size)
+        swarm_hp_memory_indices = np.random.randint(self.params.hyperparameter_memory_length, size=pop_size)
         self.sample_from_cauchy(
             self.params.SWARM_mutation_scale,
-            self.params.SWARM_memory[random_index, 4],
+            self.params.SWARM_memory[swarm_hp_memory_indices, 4],
             self.params.shade_scale,
             (0., 1.)
         )
@@ -361,16 +350,14 @@ class AMESH:
             out=self.pre_allocated.global_guide_mutated
         )
 
+        return swarm_hp_memory_indices
+
     def update_swarm_memory(self,
-                            pop_promising_position: NDArray[np.number],
-                            survival_position: NDArray[np.number],
                             pop_promising_idxs: NDArray[np.intp]) -> None:
-        r'''Updates the swarm historical means using successful offspring. The inertia, assimilation, and communication weights and the mutation rate are updated using a weighted Lehmer mean, while the communication probability is updated using a weighted arithmetic mean.
+        r'''Updates the swarm historical means using successful offspring. The inertia, assimilation, and communication weights and the mutation rate are updated using an unweighted Lehmer mean, while the communication probability is updated using an arithmetic mean.
         
         Args:
-            pop_promising_position (:type:`NDArray[np.number]`): Matrix containing the original decision vectors associated with the successful offspring. Its shape must be ``(n_success, decision_dim)``.
-            survival_position (:type:`NDArray[np.number]`): Matrix containing the surviving offspring decision vectors corresponding to ``position``. Its shape must be ``(n_success, decision_dim)``.
-            pop_promising_idxs (:type:`NDArray[np.intp]`): Indices of the particles from population that generated successful offspring. These indices are used to retrieve the successful ``F`` and ``CR`` values.
+            pop_promising_idxs (:type:`NDArray[np.intp]`): Indices of the particles that generated successful offspring, used to retrieve their swarm parameter values.
         '''
 
         if len(pop_promising_idxs) == 0:
@@ -379,26 +366,18 @@ class AMESH:
         successful_W = self.params.SWARM_W[pop_promising_idxs]
         successful_Pcom = self.params.SWARM_Pcom[pop_promising_idxs]
         successful_mutation_rate = self.params.SWARM_mutation_scale[pop_promising_idxs]
-        # Calculate the weight based on Euclidean distance between the position and the survival position
-        normalized_step = (pop_promising_position - survival_position) / (self.params.decision_upper_bounds - self.params.decision_lower_bounds)
-        euclidean_distance = np.linalg.norm(normalized_step, axis=1)
-        distance_sum = np.sum(euclidean_distance)
-        if distance_sum > 0:
-            weight = euclidean_distance / distance_sum
-        else:
-            weight = np.full(len(euclidean_distance), 1.0 / len(euclidean_distance))
-        # SHADE-style Lehmer mean
-        mean_W = np.sum((successful_W ** 2) * weight[:, np.newaxis], axis=0) / np.sum(successful_W * weight[:, np.newaxis], axis=0)
-        mean_mutation_rate = np.sum((successful_mutation_rate ** 2) * weight) / np.sum(successful_mutation_rate * weight)
+        # Unweighted Lehmer means
+        mean_W = np.sum(successful_W ** 2, axis=0) / np.sum(successful_W, axis=0)
+        mean_mutation_rate = np.sum(successful_mutation_rate ** 2) / np.sum(successful_mutation_rate)
         # Arithmetic mean
-        mean_Pcom = np.sum(successful_Pcom * weight)
+        mean_Pcom = np.mean(successful_Pcom)
         # Update the swarm memory
         k = self.params.hyperparameter_last_index
         self.params.SWARM_memory[k, 0:3] = mean_W
         self.params.SWARM_memory[k, 3] = mean_Pcom
         self.params.SWARM_memory[k, 4] = mean_mutation_rate
 
-    def move_population(self) -> None:
+    def move_population(self, swarm_hp_memory_indices: NDArray[np.intp]) -> None:
         r'''Applies the A-MESH equation of motion to the copied particles:
         
         .. math::
@@ -423,9 +402,12 @@ class AMESH:
 
         - :math:`x_{pb}` is the personal guide vector of the particle;
         - :math:`x_{gb}` is the global guide vector of the particle.
-        
+
+        Args:
+            swarm_hp_memory_indices (:type:`NDArray[np.intp]`): The indices of the swarm's hyperparameter memory to use.
+
         Note:
-            In this implementation, the weights are calculated every generation by :meth:`mutation` and each particle has its own weight. Every particle has its communication matrix too.
+            The memory indices returned by :meth:`mutation` are reused for the movement parameters. Each particle has its own weights and communication vector.
         '''
 
         # Get the parameters
@@ -443,15 +425,14 @@ class AMESH:
         V_copy = self.pre_allocated.velocity_copy
         F_copy = self.pre_allocated.fitness_copy
         # Get the equation of motion parameters
-        random_index = np.random.randint(self.params.hyperparameter_memory_length, size=self.params.population_size)
         self.sample_from_cauchy(
             self.params.SWARM_W,
-            self.params.SWARM_memory[random_index, 0:3],
+            self.params.SWARM_memory[swarm_hp_memory_indices, 0:3],
             self.params.shade_scale,
             (0., 1.)
         )
         W = self.params.SWARM_W
-        self.params.SWARM_Pcom[:] = np.random.normal(loc=self.params.SWARM_memory[random_index, 3], scale=self.params.shade_scale)
+        self.params.SWARM_Pcom[:] = np.random.normal(loc=self.params.SWARM_memory[swarm_hp_memory_indices, 3], scale=self.params.shade_scale)
         np.clip(self.params.SWARM_Pcom, 0, 1, out=self.params.SWARM_Pcom)
         C = np.random.rand(population_size, params.decision_dim) <= self.params.SWARM_Pcom[:, np.newaxis]
         # Calculate the new velocity
@@ -612,19 +593,17 @@ class AMESH:
                     # Update global guides
                     self.global_guide_method()
                     # Mutate the global guides
-                    self.mutation()
+                    swarm_hp_memory_indices = self.mutation()
                     # Store some data of the population before the movement
                     self.pre_allocated.position_copy[:] = self.population.position.copy()
                     self.pre_allocated.velocity_copy[:] = self.population.velocity.copy()
                     self.pre_allocated.fitness_copy[:] = self.population.fitness.copy()
                     # Apply the movviment to the particles
-                    self.move_population()
+                    self.move_population(swarm_hp_memory_indices)
                     # Select the best particles from those before and after the moviment
                     best_copy_idxs = self.elitism()
                     # Update the swarm hyperparameter memory
-                    self.update_swarm_memory(self.population.position[best_copy_idxs],
-                                             self.pre_allocated.position_copy[best_copy_idxs],
-                                             best_copy_idxs)
+                    self.update_swarm_memory(best_copy_idxs)
                     # Update A-MESH memory
                     self.update_amesh_memory()
                     # Update the algorithm progress

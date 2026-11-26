@@ -180,14 +180,12 @@ def test_move_population():
   )
   
   amesh.global_guide_method()
-  amesh.mutation()
+  swarm_memory_indices = amesh.mutation()
   
   pop_size = amesh.params.population_size
   dim = amesh.params.decision_dim
   # Mock of the personal guide index
   pb_indices = np.random.randint(0, amesh.params.max_personal_guides, size=pop_size,)
-  # Mock of the SHADE memory index used for W and Pcom
-  random_index = np.random.randint(0, amesh.params.hyperparameter_memory_length, size=pop_size)
   # Deterministic E weights: shape (population size, 3)
   W_mock = np.random.uniform(0.0, 1.0, size=(pop_size, 3))
   # Probability of communication per particle: shape (population_size,)
@@ -197,7 +195,7 @@ def test_move_population():
   def mock_sample_from_cauchy(out, loc, scale, bounds):
       out[:] = W_mock
   with (
-      patch("numpy.random.randint", side_effect=[pb_indices, random_index]),
+      patch("numpy.random.randint", return_value=pb_indices),
       patch.object(amesh, "sample_from_cauchy", side_effect=mock_sample_from_cauchy),
       patch("numpy.random.normal", return_value=Pcom_mock.copy()),
       patch("numpy.random.rand", return_value=communication_probs),
@@ -215,7 +213,7 @@ def test_move_population():
       Pcom = np.clip(Pcom_mock, 0.0, 1.0)
       C = communication_probs <= Pcom[:, np.newaxis]
       # Move the population and then test if the particles were correctly moved
-      amesh.move_population()
+      amesh.move_population(swarm_memory_indices)
       for i in range(pop_size):
           x = X0[i]
           v_old = V0[i]
